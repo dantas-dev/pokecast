@@ -1,0 +1,30 @@
+# dependencias
+node_modules/
+
+# videos e legendas (conteudo - nao versionar)
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.m4v
+*.webm
+*.srt
+*.vtt
+*.ass
+
+# estado de runtime gerado pelo app
+.pokecast-progress.json
+.firewall-done
+
+# notas pessoais (nao versionar)
+*.local.md
+
+# logs
+*.log
+
+# lixo de SO / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

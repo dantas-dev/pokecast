@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pokécast</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel2: #1f232c; --line: #2a2f3a;
+    --txt: #e6e9ef; --muted: #8b93a3; --accent: #ffcb05; --accent2: #3b6cff; --ok: #36c46b; --off: #e0526b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.4 system-ui, sans-serif; background: var(--bg); color: var(--txt); padding-bottom: 120px; }
+  header { position: sticky; top: 0; z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 14px; padding: 12px 18px; }
+  h1 { font-size: 18px; margin: 0; color: var(--accent); letter-spacing: .5px; }
+  .tvstate { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--off); }
+  .dot.on { background: var(--ok); }
+  .grow { flex: 1; }
+  input[type=search] { background: var(--panel2); border: 1px solid var(--line); color: var(--txt);
+    padding: 8px 12px; border-radius: 8px; width: 240px; }
+  button { background: var(--panel2); border: 1px solid var(--line); color: var(--txt); padding: 7px 12px;
+    border-radius: 8px; cursor: pointer; font-size: 13px; }
+  button:hover { border-color: var(--accent2); }
+  button:disabled { opacity: .4; cursor: default; }
+  main { max-width: 920px; margin: 0 auto; padding: 16px; }
+  .folder { margin-bottom: 14px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel); }
+  .folder > h2 { margin: 0; font-size: 14px; padding: 12px 14px; cursor: pointer; display: flex; gap: 8px;
+    align-items: center; background: var(--panel2); }
+  .folder > h2 .count { color: var(--muted); font-weight: 400; }
+  .folder.collapsed ul { display: none; }
+  .folder .caret { transition: transform .15s; }
+  .folder.collapsed .caret { transform: rotate(-90deg); }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-top: 1px solid var(--line); cursor: pointer; }
+  li:hover { background: var(--panel2); }
+  li.playing { background: #20272f; }
+  li.playing .name { color: var(--accent); }
+  .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pbar { height: 3px; background: var(--line); border-radius: 2px; margin-top: 5px; }
+  .pbar > i { display: block; height: 100%; background: var(--accent2); border-radius: 2px; }
+  .epmeta { flex: 1; min-width: 0; }
+  .restart { font-size: 12px; padding: 4px 8px; }
+  .hidden { display: none !important; }
+  footer { position: fixed; bottom: 0; left: 0; right: 0; background: var(--panel); border-top: 1px solid var(--line);
+    padding: 10px 18px; display: flex; flex-direction: column; gap: 8px; }
+  .nowrow { display: flex; align-items: center; gap: 14px; }
+  .nowtitle { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+  .nowtitle small { color: var(--muted); font-weight: 400; }
+  .ctrls { display: flex; align-items: center; gap: 8px; }
+  .ctrls button { width: 40px; height: 36px; font-size: 15px; }
+  .seekrow { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
+  input[type=range] { -webkit-appearance: none; appearance: none; height: 5px; background: var(--line); border-radius: 4px; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--accent); }
+  #seek { flex: 1; }
+  .vol { display: flex; align-items: center; gap: 6px; }
+  #vol { width: 90px; }
+  label.toggle { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); cursor: pointer; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Pokécast</h1>
+  <div class="tvstate"><span class="dot" id="tvdot"></span><span id="tvname">searching for TV…</span></div>
+  <div class="grow"></div>
+  <input type="search" id="q" placeholder="Search episode…">
+  <button id="reconnect" title="Search for the TV again">Reconnect</button>
+  <button id="quit" title="Shut down the server">Shut down</button>
+</header>
+
+<main id="library">loading library…</main>
+
+<footer>
+  <div class="nowrow">
+    <div class="nowtitle" id="nowtitle">Nothing playing</div>
+    <label class="toggle"><input type="checkbox" id="autoplay"> Autoplay next</label>
+  </div>
+  <div class="seekrow">
+    <div class="ctrls">
+      <button id="playpause" disabled>▶</button>
+      <button id="stop" disabled>■</button>
+    </div>
+    <span id="curtime">0:00</span>
+    <input type="range" id="seek" min="0" max="100" value="0" disabled>
+    <span id="durtime">0:00</span>
+    <div class="vol">Vol<input type="range" id="vol" min="0" max="100" value="50"></div>
+  </div>
+</footer>
+
+<script>
+const $ = s => document.querySelector(s);
+const api = (url, body) => fetch(url, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : undefined).then(r => r.json());
+const fmt = s => { s = Math.max(0, Math.floor(s || 0)); const m = Math.floor(s / 60), x = s % 60; return m + ':' + String(x).padStart(2, '0'); };
+
+let seeking = false, draggingVol = false, lastRel = null;
+
+async function loadLibrary() {
+  const data = await api('/api/library');
+  const root = $('#library');
+  if (!data.groups.length) { root.innerHTML = '<p style="color:var(--muted)">No videos found in the subfolders.</p>'; return; }
+  root.innerHTML = '';
+  for (const g of data.groups) {
+    const sec = document.createElement('section');
+    sec.className = 'folder';
+    sec.innerHTML = `<h2><span class="caret">▾</span>${esc(g.folder)} <span class="count">(${g.items.length})</span></h2><ul></ul>`;
+    const ul = sec.querySelector('ul');
+    sec.querySelector('h2').onclick = () => sec.classList.toggle('collapsed');
+    for (const it of g.items) {
+      const li = document.createElement('li');
+      li.dataset.rel = it.rel;
+      li.dataset.name = it.name.toLowerCase();
+      const pct = it.progress && it.progress.duration ? Math.min(100, 100 * it.progress.time / it.progress.duration) : 0;
+      li.innerHTML = `<div class="epmeta"><div class="name">${esc(it.name)}</div>${pct ? `<div class="pbar"><i style="width:${pct}%"></i></div>` : ''}</div>` +
+        (it.progress ? `<button class="restart" title="Restart from the beginning">↺</button>` : '');
+      li.querySelector('.epmeta').onclick = () => cast(it.rel, true);
+      const rb = li.querySelector('.restart');
+      if (rb) rb.onclick = e => { e.stopPropagation(); cast(it.rel, false); };
+      ul.appendChild(li);
+    }
+    root.appendChild(sec);
+  }
+  applyFilter();
+}
+
+function esc(s) { return s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+async function cast(rel, resume) {
+  $('#nowtitle').textContent = 'Loading…';
+  const r = await api('/api/cast', { rel, resume });
+  if (r.error) $('#nowtitle').textContent = 'Error: ' + r.error;
+}
+
+function applyFilter() {
+  const q = $('#q').value.trim().toLowerCase();
+  document.querySelectorAll('.folder').forEach(sec => {
+    let visible = 0;
+    sec.querySelectorAll('li').forEach(li => {
+      const show = !q || li.dataset.name.includes(q);
+      li.classList.toggle('hidden', !show);
+      if (show) visible++;
+    });
+    sec.classList.toggle('hidden', visible === 0);
+  });
+}
+
+async function poll() {
+  let s;
+  try { s = await api('/api/status'); } catch { return; }
+  // TV state
+  const on = !!s.device;
+  $('#tvdot').classList.toggle('on', on);
+  $('#tvname').textContent = s.device ? `${s.device.name} (${s.device.host})` : 'TV not found';
+  // autoplay
+  if (document.activeElement !== $('#autoplay')) $('#autoplay').checked = s.autoplay;
+  // volume
+  if (!draggingVol && s.volume && s.volume.level != null) $('#vol').value = Math.round(s.volume.level * 100);
+  // playback
+  const p = s.playback || {};
+  const playing = p.state === 'PLAYING', paused = p.state === 'PAUSED', active = playing || paused || p.state === 'BUFFERING';
+  $('#playpause').disabled = !active;
+  $('#stop').disabled = !active;
+  $('#seek').disabled = !active || !p.duration;
+  $('#playpause').textContent = playing ? '❚❚' : '▶';
+  $('#nowtitle').innerHTML = p.rel ? `${esc(p.title || '')} <small>· ${p.state.toLowerCase()}</small>` : 'Nothing playing';
+  if (!seeking && p.duration) {
+    $('#seek').max = Math.floor(p.duration);
+    $('#seek').value = Math.floor(p.currentTime || 0);
+  }
+  $('#curtime').textContent = fmt(p.currentTime);
+  $('#durtime').textContent = fmt(p.duration);
+  // mark which item is playing
+  if (p.rel !== lastRel) {
+    lastRel = p.rel;
+    document.querySelectorAll('li').forEach(li => li.classList.toggle('playing', li.dataset.rel === p.rel));
+  }
+}
+
+// ---- controls ----
+$('#playpause').onclick = () => api('/api/control', { action: $('#playpause').textContent === '▶' ? 'play' : 'pause' });
+$('#stop').onclick = () => api('/api/control', { action: 'stop' });
+$('#seek').addEventListener('input', () => { seeking = true; $('#curtime').textContent = fmt($('#seek').value); });
+$('#seek').addEventListener('change', async () => { await api('/api/seek', { time: Number($('#seek').value) }); seeking = false; });
+let volTimer;
+$('#vol').addEventListener('input', () => {
+  draggingVol = true; clearTimeout(volTimer);
+  volTimer = setTimeout(() => api('/api/volume', { level: Number($('#vol').value) / 100 }).finally(() => draggingVol = false), 200);
+});
+$('#autoplay').onchange = () => api('/api/autoplay', { on: $('#autoplay').checked });
+$('#q').addEventListener('input', applyFilter);
+$('#reconnect').onclick = async () => { $('#tvname').textContent = 'searching…'; await api('/api/reconnect', {}); };
+$('#quit').onclick = async () => {
+  if (!confirm('Shut down the server? This page will stop working.')) return;
+  await api('/api/quit', {}).catch(() => {});
+  document.body.innerHTML = '<p style="text-align:center;margin-top:80px;color:var(--muted)">Server shut down. You can close this tab.</p>';
+};
+
+loadLibrary();
+setInterval(poll, 1500);
+poll();
+</script>
+</body>
+</html>
